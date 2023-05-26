@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace VRP.Helpers
@@ -7,27 +8,51 @@ namespace VRP.Helpers
     public static class Log
     {
         private const string DefaultTag = "VRP";
-        private const string FileName = "DebugLogExport_{0}.txt";
+        private const string MultipleLogsFileName = "DebugLogExport_{0}.txt";
+        private const string OneLogFileName = "DebugLogExport.txt";
         private const string DateTimeFormat = "MM-dd-yy_hh-mm-ss";
+        private const string LogFolder = "Logs";
+        private const string StackTraceStartSeparator = "\r\n-----------------CODE PATH:\r\n";
+        private const string EndLogMessageSeparator = "-----------------END LOG MESSAGE!\r\n\n\n";
+        
+        private const int MaxLogsFiles = 25;
 
         private static bool _isActive;
-        private static string _folderName => Application.persistentDataPath;
         private static string _filePath;
+        private static string _folderPath;
+        
         private static ILogger UnityLogger => Debug.unityLogger;
+        
+        public static bool IsFullUnityLogs { private get; set; }
+        
+        public static bool ToKeepAllLogFiles { private get; set; }
+        
+        private static string FolderPath
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(_folderPath))
+                {
+                    _folderPath = Path.Combine(Application.persistentDataPath, LogFolder);
+                }
+
+                return _folderPath;
+            }
+        }
 
 
         static Log()
         {
             Application.logMessageReceived += HandleLog;
         }
-
+        
         /// <summary>
         /// Called on all messages, including system
         /// </summary>
-        /// <param name="condition"></param>
-        /// <param name="stacktrace"></param>
+        /// <param name="logString"></param>
+        /// <param name="stackTrace"></param>
         /// <param name="type"></param>
-        private static void HandleLog(string condition, string stacktrace, LogType type)
+        private static void HandleLog(string logString, string stackTrace, LogType type)
         {
             if (!_isActive)
             {
@@ -37,7 +62,16 @@ namespace VRP.Helpers
             DateTime time = DateTime.Now;
             string timeStamp = $"{time.Hour:D2}:{time.Minute:D2}:{time.Second:D2}.{time.Millisecond:D3}";
 
-            string fullMessage = $"## {timeStamp} {type}\n{condition}\n\n";
+            string fullMessage = $"### {timeStamp}. LOG TYPE: {type}\r\n{logString}\r\n";
+            
+            if (IsFullUnityLogs)
+            {
+                fullMessage += StackTraceStartSeparator + stackTrace + EndLogMessageSeparator;
+            }
+            else
+            {
+                fullMessage += StackTraceStartSeparator + EndLogMessageSeparator;
+            }
 
             WriteToFile(fullMessage);
         }
@@ -119,12 +153,15 @@ namespace VRP.Helpers
 
         private static void CreateLogFile()
         {
-            if (Application.isEditor && !Directory.Exists(_folderName))
+            if (!Directory.Exists(FolderPath))
             {
-                Directory.CreateDirectory(_folderName);
+                Directory.CreateDirectory(FolderPath);
+            }else
+            {
+                DeleteLogsIfMore();
             }
 
-            _filePath = Path.Combine(_folderName, string.Format(FileName, DateTime.Now.ToString(DateTimeFormat)));
+            _filePath = GetFilePath();
 
             Debug.Log($"Exporting Log File to {_filePath}");
 
@@ -132,6 +169,25 @@ namespace VRP.Helpers
             {
                 File.Delete(_filePath);
             }
+        }
+        
+        private static async void DeleteLogsIfMore()
+        {
+            if (Directory.GetFiles(FolderPath, "*.txt").Length < MaxLogsFiles)
+            {
+                return;
+            }
+
+            foreach (string file in Directory.GetFiles(FolderPath))
+            {
+                await Task.Run(() => File.Delete(file));
+            }
+        }
+        
+        private static string GetFilePath()
+        {
+            return Path.Combine(FolderPath, ToKeepAllLogFiles ?
+                string.Format(MultipleLogsFileName, DateTime.Now.ToString(DateTimeFormat)) : OneLogFileName);
         }
 
         private static void WriteToFile(string message)
